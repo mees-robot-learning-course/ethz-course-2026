@@ -29,7 +29,7 @@ Fill in the TODOs in `exercises/ex1.py`:
 After you are done, you can test the results of the robot tracking the keypoints using inverse kinematics by running the following:
 
 ```bash
-python exercises/inverse_kinematics.py
+python scripts/inverse_kinematics.py
 ```
 
 Note that the tracking is done by purely teleporting the joint positions to the output from IK; there is still no control involved.
