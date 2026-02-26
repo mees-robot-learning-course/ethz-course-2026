@@ -39,8 +39,8 @@ For those who use the lab computers. The personal drive only has 10 GB sapce. Th
 
 Install the requirements and then the local `so101_gym` package in editable (development) mode — this automatically pulls in all required libraries:
 
-`pip install -r hw2_so100_tutorial/requirements.txt`
-`pip install -e hw2_so100_tutorial`
+`pip install -r hw2_robot_control_mdps/requirements.txt`
+`pip install -e hw2_robot_control_mdps`
 
 ### What Gets Installed
 
