@@ -10,7 +10,7 @@ from scripts.utils import quat_mul, quat_conjugate, quat_normalize, rot_mat_to_q
 # entire array reference, otherwise the physics engine will not see your changes!
 """
 
-def reset_robot(default_qpos: np.ndarray) -> None:
+def reset_robot(default_qpos: np.ndarray) -> np.ndarray:
     """
     TODO: Implement robot reset to its default joint positions with some small uniform noise (-0.5, 0.5).
     You can add random noise to the default joint positions using np.random.uniform.
@@ -25,7 +25,7 @@ def reset_robot(default_qpos: np.ndarray) -> None:
     
 
 
-def reset_target_position(base_pos: np.ndarray) -> None:
+def reset_target_position(base_pos: np.ndarray) -> np.ndarray:
     """
     TODO: Sample and compute a new random target position relative to the base from uniform distribution.
     The ranges for the uniform distribution are given by the following arrays:
