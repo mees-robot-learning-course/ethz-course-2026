@@ -1,0 +1,6 @@
+setuptools==69.5.1
+gymnasium==1.2.3
+mujoco==3.5.0
+numpy==2.4.2
+stable_baselines3==2.7.1
+tensorboard==2.20.0
