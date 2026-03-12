@@ -59,6 +59,7 @@ def process_action(action: np.ndarray, jnt_range: np.ndarray) -> np.ndarray:
     Returns:
     - target_qpos: np.ndarray. Target joint positions to apply as control. Dimensionality: 1D array, Shape: (num_joints,).
     """
+    action = np.clip(action, -1, 1)  # add clipping for safety
     span = jnt_range[:, 1] - jnt_range[:, 0]
     target_qpos = (action + 1) * span / 2  # Scale
     target_qpos += jnt_range[:, 0]  # Shift
