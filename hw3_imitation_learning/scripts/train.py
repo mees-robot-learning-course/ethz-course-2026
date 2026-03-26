@@ -30,8 +30,8 @@ from torch.utils.data import DataLoader, random_split
 
 # TODO: Choose your own hyperparameters!
 EPOCHS = 200
-BATCH_SIZE = 64
-LR = 1e-3
+BATCH_SIZE = 512
+LR = 3e-4
 VAL_SPLIT = 0.1
 def train_one_epoch(
     model: BasePolicy,
@@ -173,6 +173,14 @@ def main() -> None:
             '\'{"hidden_dim": 768, "depth": 6}\'.'
         ),
     )
+    parser.add_argument(
+        "--save-name",
+        type=str,
+        default=None,
+        help=(
+            "Optional checkpoint name stem (e.g. 'ex1'). "
+        ),
+    )
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
     args = parser.parse_args()
 
@@ -206,6 +214,8 @@ def main() -> None:
             args.backbone = str(cfg["backbone"])
         if "backbone_kwargs" in cfg and cfg["backbone_kwargs"] is not None:
             args.backbone_kwargs = cfg["backbone_kwargs"]
+        if "save_name" in cfg and cfg["save_name"] is not None:
+            args.save_name = str(cfg["save_name"])
         if "seed" in cfg and cfg["seed"] is not None:
             args.seed = int(cfg["seed"])
 
@@ -313,7 +323,7 @@ def main() -> None:
 
     # TODO: implement an optimizer and scheduler
     lr = args.lr if args.lr is not None else LR
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
         T_max=num_epochs,
@@ -332,14 +342,30 @@ def main() -> None:
                 action_space = base.removeprefix("action_")
                 break
 
-    save_name = f"best_model_{action_space}_{args.policy}.pt"
+    if args.save_name is None:
+        save_stem = f"{action_space}_{args.policy}"
+    else:
+        custom = args.save_name.strip()
+        if not custom:
+            raise SystemExit("--save-name must be a non-empty string when provided.")
+        if custom.endswith(".pt"):
+            custom = custom[:-3]
+        if custom.startswith("best_model_"):
+            custom = custom[len("best_model_") :]
+        if not custom:
+            raise SystemExit(
+                "--save-name must include a non-empty name after 'best_model_'."
+            )
+        save_stem = custom
+
+    save_name = f"best_model_{save_stem}.pt"
 
     n_dagger_eps = 0
     for zp in zarr_paths:
         z = zarr_lib.open_group(str(zp), mode="r")
         n_dagger_eps += z.attrs.get("num_dagger_episodes", 0)
     if n_dagger_eps > 0:
-        save_name = f"best_model_{action_space}_{args.policy}_dagger{n_dagger_eps}ep.pt"
+        save_name = f"best_model_{save_stem}_dagger{n_dagger_eps}ep.pt"
     # Default: checkpoints/<task>/
     if "multi_cube" in str(args.zarr):
         ckpt_dir = Path("./checkpoints/multi_cube")

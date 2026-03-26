@@ -2,8 +2,8 @@
   "zarr": "datasets/processed/single_cube/processed_ee_xyz.zarr",
   "policy": "obstacle",
   "backbone": "mlp",
-  "chunk_size": 16,
-  "lr": 0.001,
+  "chunk_size": 32,
   "state_keys": ["state_ee_xyz", "state_gripper", "state_cube[:3]", "state_obstacle"],
-  "action_keys": ["action_ee_xyz", "action_gripper"]
+  "action_keys": ["action_ee_xyz", "action_gripper"],
+  "lr": 3e-4
 }

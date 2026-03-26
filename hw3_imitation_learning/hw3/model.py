@@ -9,7 +9,8 @@ import torch
 from torch import nn
 
 _BACKBONE_DEFAULT_KWARGS: dict[str, dict[str, Any]] = {
-    "mlp": {"hidden_dim": 512, "depth": 4},
+    "mlp": {"hidden_dim": 512, "depth": 4, "use_layernorm": True, "dropout": 0.2},
+    "residual_mlp": {"hidden_dim": 768, "depth": 4, "use_layernorm": True, "dropout": 0.2},
 }
 VALID_BACKBONES = set(_BACKBONE_DEFAULT_KWARGS)
 
@@ -33,8 +34,12 @@ def resolve_backbone_kwargs(backbone: str, **kwargs: Any) -> dict[str, Any]:
     if backbone == "mlp":
         resolved["hidden_dim"] = int(resolved["hidden_dim"])
         resolved["depth"] = int(resolved["depth"])
+        resolved["use_layernorm"] = bool(resolved["use_layernorm"])
+        resolved["dropout"] = float(resolved["dropout"])
         if resolved["hidden_dim"] <= 0 or resolved["depth"] <= 0:
             raise ValueError("MLP backbone requires positive 'hidden_dim' and 'depth'.")
+        if resolved["dropout"] < 0 or resolved["dropout"] > 1:
+            raise ValueError("MLP backbone requires dropout to be between 0 and 1.")
     return resolved
 
 
@@ -77,7 +82,8 @@ class MLP(nn.Module):
         hidden_dim: int = 512,
         depth: int = 4,
         activation: type[nn.Module] = nn.GELU,
-        use_layernorm: bool = False
+        use_layernorm: bool = False,
+        dropout: float = 0.1
         ) -> None:
         super().__init__()
         self.in_dim = in_dim
@@ -95,12 +101,68 @@ class MLP(nn.Module):
                 if use_layernorm:
                     self.layers.append(nn.LayerNorm(d_out))
                 self.layers.append(activation())
+                self.layers.append(nn.Dropout(dropout))
             in_dim = d_out
 
         self.mlp = nn.Sequential(*self.layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.mlp(x)
+
+
+class ResidualBlock(nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        activation: type[nn.Module] = nn.GELU,
+        use_layernorm: bool = True,
+        dropout: float = 0.1,
+    ) -> None:
+        super().__init__()
+        layers: list[nn.Module] = [nn.Linear(dim, dim)]
+        if use_layernorm:
+            layers.append(nn.LayerNorm(dim))
+        layers.append(activation())
+        layers.append(nn.Dropout(dropout))
+        layers.append(nn.Linear(dim, dim))
+        if use_layernorm:
+            layers.append(nn.LayerNorm(dim))
+        self.block = nn.Sequential(*layers)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x + self.block(x)  # skip connection
+
+
+class ResidualMLP(nn.Module):
+    def __init__(
+        self,
+        in_dim: int,
+        out_dim: int,
+        hidden_dim: int = 512,
+        depth: int = 4,
+        activation: type[nn.Module] = nn.GELU,
+        use_layernorm: bool = True,
+        dropout: float = 0.1,
+    ) -> None:
+        super().__init__()
+        self.in_proj = nn.Linear(in_dim, hidden_dim)
+        self.blocks = nn.Sequential(
+            *[
+                ResidualBlock(
+                    hidden_dim,
+                    activation=activation,
+                    use_layernorm=use_layernorm,
+                    dropout=dropout,
+                )
+                for _ in range(depth)
+            ]
+        )
+        self.out_proj = nn.Linear(hidden_dim, out_dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.in_proj(x)
+        x = self.blocks(x)
+        return self.out_proj(x)
 
 # TODO: Students implement ObstaclePolicy here.
 class ObstaclePolicy(BasePolicy):
@@ -135,8 +197,20 @@ class ObstaclePolicy(BasePolicy):
                 chunk_size * action_dim,
                 hidden_dim=self.backbone_kwargs["hidden_dim"],
                 depth=self.backbone_kwargs["depth"],
-                use_layernorm=True,
+                use_layernorm=self.backbone_kwargs["use_layernorm"],
+                dropout=self.backbone_kwargs["dropout"],
             )
+        elif backbone == "residual_mlp":
+            self.backbone = ResidualMLP(
+                state_dim,
+                chunk_size * action_dim,
+                hidden_dim=self.backbone_kwargs["hidden_dim"],
+                depth=self.backbone_kwargs["depth"],
+                use_layernorm=self.backbone_kwargs["use_layernorm"],
+                dropout=self.backbone_kwargs["dropout"],
+            )
+        else:
+            raise ValueError(f"Unknown backbone: {backbone}")
 
     def forward(self, state: torch.Tensor) -> torch.Tensor:
         """Return predicted action chunk of shape (B, chunk_size, action_dim)."""
