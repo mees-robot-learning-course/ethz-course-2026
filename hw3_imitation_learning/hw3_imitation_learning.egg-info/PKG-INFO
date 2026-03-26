@@ -1,0 +1,11 @@
+Metadata-Version: 2.4
+Name: hw3-imitation-learning
+Version: 0.1.0
+Summary: HW3 – Imitation learning with the SO-100 robot arm
+Requires-Python: >=3.10
+Requires-Dist: torch
+Requires-Dist: torchvision
+Requires-Dist: zarr
+Requires-Dist: opencv-python
+Requires-Dist: dm-control
+Requires-Dist: pyquaternion
