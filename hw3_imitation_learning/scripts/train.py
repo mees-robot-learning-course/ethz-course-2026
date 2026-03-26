@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import torch
@@ -28,10 +29,11 @@ from hw3.model import BasePolicy, build_policy
 from torch.utils.data import DataLoader, random_split
 
 # TODO: Choose your own hyperparameters!
-EPOCHS = ... 
-BATCH_SIZE = ...
-LR = ...
+EPOCHS = 100 
+BATCH_SIZE = 64
+LR = 1e-3
 VAL_SPLIT = 0.1
+VALID_BACKBONES = ("mlp",)
 
 
 def train_one_epoch(
@@ -48,6 +50,21 @@ def train_one_epoch(
         states, action_chunks = batch
         # TODO: Implement the training step for one batch here.
         # This mostly: Get states and action_chunks onto the correct device, compute the loss, and step the optimizer.
+        # Move data to device
+        states = states.to(device)
+        action_chunks = action_chunks.to(device)
+
+        # Compute loss
+        loss = model.compute_loss(states, action_chunks)
+        
+        # Compute gradients and step optimizer
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        # Update total loss and number of batches
+        total_loss += loss.item()
+        n_batches += 1
 
     return total_loss / max(n_batches, 1)
 
@@ -65,6 +82,16 @@ def evaluate(
     for batch in loader:
         states, action_chunks = batch
         # TODO: Implement the evaluation step for one batch here.
+        # Move data to device
+        states = states.to(device)
+        action_chunks = action_chunks.to(device)
+
+        # Compute loss
+        loss = model.compute_loss(states, action_chunks)
+
+        # Update total loss and number of batches
+        total_loss += loss.item()
+        n_batches += 1
 
     return total_loss / max(n_batches, 1)
 
@@ -73,7 +100,23 @@ def main() -> None:
     # TODO: You may add any cli arguments that make life easier for you like learning rate etc.
     parser = argparse.ArgumentParser(description="Train action-chunking policy.")
     parser.add_argument(
-        "--zarr", type=Path, required=True, help="Path to processed .zarr store."
+        "--task-config",
+        type=Path,
+        default=None,
+        help=(
+            "Path to a JSON task config file. If provided, config values override CLI values "
+            "(for supported fields)."
+        ),
+    )
+    parser.add_argument(
+        "--zarr", type=Path, default=None, help="Path to processed .zarr store."
+    )
+    parser.add_argument(
+        "--extra-zarr",
+        type=Path,
+        nargs="*",
+        default=None,
+        help="Optional additional processed .zarr stores to merge in (e.g. for DAgger).",
     )
     parser.add_argument(
         "--policy",
@@ -103,8 +146,87 @@ def main() -> None:
         "Supports column slicing with [:N], [M:], [M:N]. "
         "If omitted, uses the action_key attribute from the zarr metadata.",
     )
+    parser.add_argument(
+        "--lr",
+        type=float,
+        default=None,
+        help=f"Learning rate (default: module LR={LR}).",
+    )
+    parser.add_argument(
+        "--backbone",
+        type=str,
+        default=None,
+        help=(
+            f"Model backbone to use. Supported: {VALID_BACKBONES}. "
+            "If provided in --task-config, it overrides CLI; defaults to 'mlp'."
+        ),
+    )
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
     args = parser.parse_args()
+
+    # ── load config (optional) ─────────────────────────────────────────
+    if args.task_config is not None:
+        cfg_path = args.task_config
+        if not cfg_path.exists():
+            raise FileNotFoundError(f"Config file not found: {cfg_path}")
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+        if not isinstance(cfg, dict):
+            raise TypeError(f"Config must be a JSON object (dict), got: {type(cfg)}")
+
+        # Config-first: if a field is present in config, it overrides CLI.
+        if "zarr" in cfg and cfg["zarr"] is not None:
+            args.zarr = Path(cfg["zarr"])
+        if "extra_zarr" in cfg and cfg["extra_zarr"] is not None:
+            args.extra_zarr = [Path(p) for p in cfg["extra_zarr"]]
+        if "policy" in cfg and cfg["policy"] is not None:
+            args.policy = str(cfg["policy"])
+        if "chunk_size" in cfg and cfg["chunk_size"] is not None:
+            args.chunk_size = int(cfg["chunk_size"])
+        if "state_keys" in cfg and cfg["state_keys"] is not None:
+            args.state_keys = cfg["state_keys"]
+        if "action_keys" in cfg and cfg["action_keys"] is not None:
+            args.action_keys = cfg["action_keys"]
+        if "lr" in cfg and cfg["lr"] is not None:
+            args.lr = float(cfg["lr"])
+        if "backbone" in cfg and cfg["backbone"] is not None:
+            args.backbone = str(cfg["backbone"])
+        if "seed" in cfg and cfg["seed"] is not None:
+            args.seed = int(cfg["seed"])
+
+    # Default backbone if neither CLI nor config specified one.
+    if args.backbone is None:
+        args.backbone = "mlp"
+    if args.backbone not in VALID_BACKBONES:
+        raise SystemExit(
+            f"Invalid backbone '{args.backbone}'. Supported backbones: {VALID_BACKBONES}"
+        )
+    if args.zarr is None:
+        raise SystemExit(
+            "You must specify --zarr, either directly on the CLI or via --task-config "
+            "(JSON field 'zarr')."
+        )
+
+    # Require explicit state/action specification via CLI or config.
+    # (We intentionally do NOT fall back to the dataset's default single key here.)
+    if args.state_keys is None or args.action_keys is None:
+        raise SystemExit(
+            "You must specify both --state-keys and --action-keys, either directly on the CLI "
+            "or via --task-config (with JSON fields 'state_keys' and 'action_keys')."
+        )
+
+    # Print resolved run configuration before starting training.
+    print("\nResolved training configuration:")
+    print(f"  zarr={args.zarr}")
+    print(
+        f"  extra_zarr={[str(p) for p in args.extra_zarr] if args.extra_zarr else []}"
+    )
+    print(f"  policy={args.policy}")
+    print(f"  chunk_size={args.chunk_size}")
+    print(f"  state_keys={args.state_keys}")
+    print(f"  action_keys={args.action_keys}")
+    print(f"  lr={args.lr if args.lr is not None else LR}")
+    print(f"  backbone={args.backbone}")
+    print(f"  seed={args.seed}")
 
     torch.manual_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -159,6 +281,8 @@ def main() -> None:
         args.policy,
         state_dim=states.shape[1],
         action_dim=actions.shape[1],
+        chunk_size=args.chunk_size,
+        backbone=args.backbone,
         # TODO: build with your desired specifications
     ).to(device)
 
@@ -166,8 +290,13 @@ def main() -> None:
     print(f"Model parameters: {n_params:,}")
 
     # TODO: implement an optimizer and scheduler
-    # optimizer =
-    # scheduler =
+    lr = args.lr if args.lr is not None else LR
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=EPOCHS,
+        eta_min=lr * 0.01,  # anneal close to (but not all the way to) zero
+    )
 
     # ── training loop ─────────────────────────────────────────────────
     best_val = float("inf")
@@ -218,6 +347,9 @@ def main() -> None:
                     },
                     "chunk_size": args.chunk_size,
                     "policy_type": args.policy,
+                    "backbone": args.backbone,
+                    "d_model": int(getattr(model, "d_model", 128)),
+                    "depth": int(getattr(model, "depth", 2)),
                     "state_keys": args.state_keys,
                     "action_keys": args.action_keys,
                     "state_dim": int(states.shape[1]),
