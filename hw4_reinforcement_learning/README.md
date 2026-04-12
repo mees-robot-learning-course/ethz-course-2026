@@ -1,6 +1,6 @@
 # Homework 4: Reinforcement Learning
 
-- **Due Date: 13.04.26 23:59 CET**  
+- **Due Date: 16.04.26 23:59 CET**  
 - **Needs to be solved individually. Plagiarism checks will be performed.**   
 
 
